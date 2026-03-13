@@ -1,6 +1,6 @@
 import { createDeepAgent } from "deepagents";
 import { VfsSandbox } from "@langchain/node-vfs";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -97,6 +97,31 @@ List any trending topics visible in the sidebar with their context labels.
 
 Always include tweet links. Never omit them.`;
 
+// ─── Findings file ────────────────────────────────────────────────────────────
+
+const now = new Date();
+const dateStr = now.toLocaleDateString("en-CA"); // YYYY-MM-DD
+const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
+
+const findingsDir = resolve(__dirname, "findings");
+const findingsFile = resolve(findingsDir, `${dateStr}.md`);
+
+mkdirSync(findingsDir, { recursive: true });
+
+function saveFindings(content: string) {
+  const separator = `\n\n---\n\n## 🕐 ${timeStr}\n\n`;
+  if (existsSync(findingsFile)) {
+    const existing = readFileSync(findingsFile, "utf8");
+    writeFileSync(findingsFile, existing + separator + content);
+  } else {
+    const header = `# X Feed — ${now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}\n\n## 🕐 ${timeStr}\n\n`;
+    writeFileSync(findingsFile, header + content);
+  }
+  console.log(`\n📁 Findings saved to findings/${dateStr}.md`);
+}
+
+// ─── Run ──────────────────────────────────────────────────────────────────────
+
 try {
   const agent = createDeepAgent({
     model: "anthropic:claude-sonnet-4-6",
@@ -105,7 +130,7 @@ try {
   });
 
   console.log("🐦 X Feed Reader Agent starting...");
-  console.log("Make sure Chrome has remote debugging enabled at chrome://inspect/#remote-debugging\n");
+  console.log(`📅 ${dateStr} ${timeStr} — saving to findings/${dateStr}.md\n`);
 
   const result = await agent.invoke({
     messages: [
@@ -118,13 +143,15 @@ try {
   });
 
   const lastMessage = result.messages.at(-1);
-  console.log("\n─── X Feed Summary ───────────────────────────────\n");
   if (lastMessage) {
-    console.log(
+    const summary =
       typeof lastMessage.content === "string"
         ? lastMessage.content
-        : JSON.stringify(lastMessage.content, null, 2)
-    );
+        : JSON.stringify(lastMessage.content, null, 2);
+
+    console.log("\n─── X Feed Summary ───────────────────────────────\n");
+    console.log(summary);
+    saveFindings(summary);
   }
 } finally {
   await sandbox.stop();
