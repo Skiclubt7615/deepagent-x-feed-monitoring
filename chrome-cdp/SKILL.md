@@ -1,75 +1,49 @@
----
-name: chrome-cdp
-description: Interact with local Chrome browser session (only on explicit user approval after being asked to inspect, debug, or interact with a page open in Chrome)
----
+# Chrome CDP Skill
 
-# Chrome CDP
+Interact with a live Chrome browser session via the Chrome DevTools Protocol.
+Run all commands through the `execute` tool using Node.js:
 
-Lightweight Chrome DevTools Protocol CLI. Connects directly via WebSocket — no Puppeteer, works with 100+ tabs, instant connection.
+```
+node chrome-cdp/scripts/cdp.mjs <command> [args...]
+```
 
-## Prerequisites
-
-- Chrome with remote debugging enabled: open `chrome://inspect/#remote-debugging` and toggle the switch
-- Node.js 22+ (uses built-in WebSocket)
+`<target>` is a unique prefix of the targetId shown by `list`.
 
 ## Commands
 
-All commands use `scripts/cdp.mjs`. The `<target>` is a **unique** targetId prefix from `list`; copy the full prefix shown in the `list` output (for example `6BE827FA`). The CLI rejects ambiguous prefixes.
+| Command | Description |
+|---------|-------------|
+| `list` | List open Chrome tabs with targetId and URL |
+| `snap <target>` | Accessibility tree — compact, semantic view of the page |
+| `html <target> [selector]` | Full page HTML or scoped to a CSS selector |
+| `eval <target> "<expr>"` | Evaluate JavaScript in the tab |
+| `nav <target> <url>` | Navigate and wait for load |
+| `click <target> <selector>` | Click element by CSS selector |
+| `shot <target>` | Screenshot → /tmp/screenshot.png |
 
-### List open pages
+## Workflow for X/Twitter
 
-```bash
-scripts/cdp.mjs list
+1. `list` — find the tab with `x.com` or `twitter.com` in the URL.
+2. If no X tab is open, pick any tab and `nav` it to `https://x.com/home`.
+3. Extract tweets with this `eval` snippet (collects author, text, stats, and link in one pass):
+
+```js
+JSON.stringify([...document.querySelectorAll('article[data-testid="tweet"]')].map(t => ({
+  author: t.querySelector('[data-testid="User-Name"]')?.innerText?.split('\n')?.join(' '),
+  text: t.querySelector('[data-testid="tweetText"]')?.innerText,
+  likes: t.querySelector('[data-testid="like"] span')?.innerText,
+  reposts: t.querySelector('[data-testid="retweet"] span')?.innerText,
+  views: t.querySelector('[data-testid="app-text-transition-container"] span')?.innerText,
+  link: (() => { const a = t.querySelector('a[href*="/status/"]'); return a ? 'https://x.com' + a.getAttribute('href') : null; })(),
+})))
 ```
 
-### Take a screenshot
-
-```bash
-scripts/cdp.mjs shot <target> [file]    # default: /tmp/screenshot.png
-```
-
-Captures the **viewport only**. Scroll first with `eval` if you need content below the fold. Output includes the page's DPR and coordinate conversion hint (see **Coordinates** below).
-
-### Accessibility tree snapshot
-
-```bash
-scripts/cdp.mjs snap <target>
-```
-
-### Evaluate JavaScript
-
-```bash
-scripts/cdp.mjs eval <target> <expr>
-```
-
-> **Watch out:** avoid index-based selection (`querySelectorAll(...)[i]`) across multiple `eval` calls when the DOM can change between them (e.g. after clicking Ignore, card indices shift). Collect all data in one `eval` or use stable selectors.
-
-### Other commands
-
-```bash
-scripts/cdp.mjs html    <target> [selector]   # full page or element HTML
-scripts/cdp.mjs nav     <target> <url>         # navigate and wait for load
-scripts/cdp.mjs net     <target>               # resource timing entries
-scripts/cdp.mjs click   <target> <selector>    # click element by CSS selector
-scripts/cdp.mjs clickxy <target> <x> <y>       # click at CSS pixel coords
-scripts/cdp.mjs type    <target> <text>         # Input.insertText at current focus; works in cross-origin iframes unlike eval
-scripts/cdp.mjs loadall <target> <selector> [ms]  # click "load more" until gone (default 1500ms between clicks)
-scripts/cdp.mjs evalraw <target> <method> [json]  # raw CDP command passthrough
-scripts/cdp.mjs stop    [target]               # stop daemon(s)
-```
-
-## Coordinates
-
-`shot` saves an image at native resolution: image pixels = CSS pixels × DPR. CDP Input events (`clickxy` etc.) take **CSS pixels**.
+4. Scroll 3–4 times to load more tweets. After each scroll wait ~1.5s then re-run the eval:
 
 ```
-CSS px = screenshot image px / DPR
+node chrome-cdp/scripts/cdp.mjs eval <target> "window.scrollBy(0, 1400)"
 ```
 
-`shot` prints the DPR for the current page. Typical Retina (DPR=2): divide screenshot coords by 2.
+Repeat until you have 30–40 tweets or the feed stops loading new content.
 
-## Tips
-
-- Prefer `snap --compact` over `html` for page structure.
-- Use `type` (not eval) to enter text in cross-origin iframes — `click`/`clickxy` to focus first, then `type`.
-- Chrome shows an "Allow debugging" modal once per tab on first access. A background daemon keeps the session alive so subsequent commands need no further approval. Daemons auto-exit after 20 minutes of inactivity.
+5. Use `snap` as a fallback if `eval` returns empty.
